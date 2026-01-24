@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+import os
+import glob
 
 def zoom_nearest_neighbor(image, scale):
     """
@@ -102,120 +104,108 @@ def main():
     print("Question 7: Image Zooming with Interpolation")
     print("="*60)
     
-    # Load small and large images
-    small_image_path = 'small_image.jpg'  # Replace with your small image
-    large_image_path = 'large_image.jpg'  # Replace with your large original
+    zooming_dir = os.path.join('Sources', 'images_for_zooming')
+    if not os.path.exists(zooming_dir):
+        print(f"Error: Directory not found: {zooming_dir}")
+        return
+
+    # Find all small images
+    small_images = []
+    for ext in ['*.png', '*.jpg', '*.jpeg']:
+        small_images.extend(glob.glob(os.path.join(zooming_dir, f"*small*{ext}")))
     
-    small_img = cv2.imread(small_image_path)
-    large_img = cv2.imread(large_image_path)
-    
-    if small_img is None:
-        print(f"Error: Could not load small image from {small_image_path}")
-        print("Creating a test image instead...")
-        # Create a simple test image
-        small_img = np.random.randint(0, 256, (100, 100, 3), dtype=np.uint8)
-        large_img = None
-    
-    # Test different zoom factors
-    zoom_factors = [2.0, 3.0, 4.0]
-    
-    # If we have a large image, calculate the zoom factor to match it
-    if large_img is not None:
-        calculated_scale = large_img.shape[0] / small_img.shape[0]
-        print(f"Calculated zoom factor to match large image: {calculated_scale:.2f}")
-        zoom_factors = [calculated_scale]
-    
-    for scale in zoom_factors:
-        print(f"\n{'='*60}")
-        print(f"Processing with zoom factor: {scale}x")
-        print(f"{'='*60}")
+    if not small_images:
+        print(f"No small images found in {zooming_dir}")
+        return
+
+    print(f"Found {len(small_images)} images to process.")
+
+    for small_image_path in small_images:
+        filename = os.path.basename(small_image_path)
+        name, ext = os.path.splitext(filename)
         
-        # (a) Nearest-neighbor interpolation
-        print("(a) Applying nearest-neighbor interpolation...")
-        zoomed_nn = zoom_nearest_neighbor(small_img, scale)
+        print(f"\nProcessing {filename}...")
         
-        # (b) Bilinear interpolation
-        print("(b) Applying bilinear interpolation...")
-        zoomed_bilinear = zoom_bilinear(small_img, scale)
+        # Try to find corresponding large image
+        # Remove "small", "_small", "_very_small" to find large version
+        large_name = name.replace('very_small', '').replace('small', '').rstrip('_')
+        large_image_path = os.path.join(zooming_dir, large_name + ext)
         
-        # Compare with OpenCV's resize for verification
-        zoomed_opencv_nn = cv2.resize(small_img, None, fx=scale, fy=scale, 
-                                      interpolation=cv2.INTER_NEAREST)
-        zoomed_opencv_linear = cv2.resize(small_img, None, fx=scale, fy=scale, 
-                                          interpolation=cv2.INTER_LINEAR)
+        small_img = cv2.imread(small_image_path)
+        large_img = cv2.imread(large_image_path) if os.path.exists(large_image_path) else None
         
-        # Display results
-        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-        
-        axes[0, 0].imshow(cv2.cvtColor(small_img, cv2.COLOR_BGR2RGB))
-        axes[0, 0].set_title(f'Original Small Image\n{small_img.shape[1]}×{small_img.shape[0]}')
-        axes[0, 0].axis('off')
-        
-        axes[0, 1].imshow(cv2.cvtColor(zoomed_nn, cv2.COLOR_BGR2RGB))
-        axes[0, 1].set_title(f'(a) Nearest-Neighbor (Manual)\n{zoomed_nn.shape[1]}×{zoomed_nn.shape[0]}')
-        axes[0, 1].axis('off')
-        
-        axes[0, 2].imshow(cv2.cvtColor(zoomed_bilinear, cv2.COLOR_BGR2RGB))
-        axes[0, 2].set_title(f'(b) Bilinear (Manual)\n{zoomed_bilinear.shape[1]}×{zoomed_bilinear.shape[0]}')
-        axes[0, 2].axis('off')
-        
-        axes[1, 0].imshow(cv2.cvtColor(zoomed_opencv_nn, cv2.COLOR_BGR2RGB))
-        axes[1, 0].set_title('OpenCV Nearest-Neighbor')
-        axes[1, 0].axis('off')
-        
-        axes[1, 1].imshow(cv2.cvtColor(zoomed_opencv_linear, cv2.COLOR_BGR2RGB))
-        axes[1, 1].set_title('OpenCV Bilinear')
-        axes[1, 1].axis('off')
-        
-        # If large image exists, compare
-        if large_img is not None and zoomed_nn.shape[:2] == large_img.shape[:2]:
-            axes[1, 2].imshow(cv2.cvtColor(large_img, cv2.COLOR_BGR2RGB))
-            axes[1, 2].set_title(f'Large Original\n{large_img.shape[1]}×{large_img.shape[0]}')
-            axes[1, 2].axis('off')
+        if small_img is None:
+            print(f"  Error: Could not load {small_image_path}")
+            continue
             
-            # Compute SSD
-            ssd_nn = compute_normalized_ssd(zoomed_nn, large_img)
-            ssd_bilinear = compute_normalized_ssd(zoomed_bilinear, large_img)
-            
-            print(f"\nNormalized SSD Results:")
-            print(f"  Nearest-Neighbor SSD: {ssd_nn:.4f}")
-            print(f"  Bilinear SSD: {ssd_bilinear:.4f}")
-            print(f"  Difference: {abs(ssd_nn - ssd_bilinear):.4f}")
-            
-            if ssd_bilinear < ssd_nn:
-                print(f"  → Bilinear is better (lower SSD by {ssd_nn - ssd_bilinear:.4f})")
-            else:
-                print(f"  → Nearest-Neighbor is better (lower SSD by {ssd_bilinear - ssd_nn:.4f})")
+        # Test different zoom factors
+        zoom_factors = [2.0, 3.0, 4.0]
+        
+        # If we have a large image, calculate the zoom factor to match it
+        if large_img is not None:
+            calculated_scale = large_img.shape[0] / small_img.shape[0]
+            print(f"  Found matching large image. Scale: {calculated_scale:.2f}x")
+            zoom_factors = [calculated_scale]
         else:
-            axes[1, 2].text(0.5, 0.5, 'No large image\nfor comparison', 
-                           ha='center', va='center', fontsize=12)
-            axes[1, 2].axis('off')
+            print(f"  No matching large image found for {large_name}{ext}. Using default scales.")
         
-        plt.tight_layout()
-        plt.savefig(f'q7_results_scale_{scale:.1f}x.png', dpi=150, bbox_inches='tight')
-        plt.show()
-        
-        # Save individual results
-        cv2.imwrite(f'q7_nn_scale_{scale:.1f}x.png', zoomed_nn)
-        cv2.imwrite(f'q7_bilinear_scale_{scale:.1f}x.png', zoomed_bilinear)
-    
-    print("\n" + "="*60)
-    print("Analysis:")
-    print("-"*60)
-    print("Nearest-Neighbor Interpolation:")
-    print("  + Fast computation (simple indexing)")
-    print("  + Preserves sharp edges")
-    print("  - Produces blocky, pixelated results")
-    print("  - Aliasing artifacts visible")
-    print("\nBilinear Interpolation:")
-    print("  + Smoother results")
-    print("  + Better visual quality")
-    print("  + Lower SSD when compared to originals")
-    print("  - Slightly slower")
-    print("  - May blur sharp edges")
-    print("\nConclusion: Bilinear interpolation generally produces")
-    print("better results with lower SSD values.")
-    print("="*60)
+        for scale in zoom_factors:
+            print(f"  Applying {scale:.1f}x zoom...")
+            
+            # (a) Nearest-neighbor interpolation
+            zoomed_nn = zoom_nearest_neighbor(small_img, scale)
+            
+            # (b) Bilinear interpolation
+            zoomed_bilinear = zoom_bilinear(small_img, scale)
+            
+            # Compare with OpenCV's resize for verification
+            zoomed_opencv_nn = cv2.resize(small_img, None, fx=scale, fy=scale, 
+                                          interpolation=cv2.INTER_NEAREST)
+            zoomed_opencv_linear = cv2.resize(small_img, None, fx=scale, fy=scale, 
+                                              interpolation=cv2.INTER_LINEAR)
+            
+            # Display results
+            fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+            
+            axes[0, 0].imshow(cv2.cvtColor(small_img, cv2.COLOR_BGR2RGB))
+            axes[0, 0].set_title(f'Original Small\n{small_img.shape[1]}×{small_img.shape[0]}')
+            axes[0, 0].axis('off')
+            
+            axes[0, 1].imshow(cv2.cvtColor(zoomed_nn, cv2.COLOR_BGR2RGB))
+            axes[0, 1].set_title(f'NN (Manual)\n{zoomed_nn.shape[1]}×{zoomed_nn.shape[0]}')
+            axes[0, 1].axis('off')
+            
+            axes[0, 2].imshow(cv2.cvtColor(zoomed_bilinear, cv2.COLOR_BGR2RGB))
+            axes[0, 2].set_title(f'Bilinear (Manual)\n{zoomed_bilinear.shape[1]}×{zoomed_bilinear.shape[0]}')
+            axes[0, 2].axis('off')
+            
+            axes[1, 0].imshow(cv2.cvtColor(zoomed_opencv_nn, cv2.COLOR_BGR2RGB))
+            axes[1, 0].set_title('OpenCV NN')
+            axes[1, 0].axis('off')
+            
+            axes[1, 1].imshow(cv2.cvtColor(zoomed_opencv_linear, cv2.COLOR_BGR2RGB))
+            axes[1, 1].set_title('OpenCV Bilinear')
+            axes[1, 1].axis('off')
+            
+            if large_img is not None and zoomed_nn.shape[:2] == large_img.shape[:2]:
+                axes[1, 2].imshow(cv2.cvtColor(large_img, cv2.COLOR_BGR2RGB))
+                axes[1, 2].set_title(f'Target Large\n{large_img.shape[1]}×{large_img.shape[0]}')
+                axes[1, 2].axis('off')
+                
+                ssd_nn = compute_normalized_ssd(zoomed_nn, large_img)
+                ssd_bilinear = compute_normalized_ssd(zoomed_bilinear, large_img)
+                print(f"    SSD (NN): {ssd_nn:.4f}, SSD (Bilinear): {ssd_bilinear:.4f}")
+            else:
+                axes[1, 2].text(0.5, 0.5, 'No comparison\navailable', ha='center', va='center')
+                axes[1, 2].axis('off')
+            
+            plt.tight_layout()
+            output_name = f'zoom_result_{name}_{scale:.1f}x.png'
+            plt.savefig(output_name, dpi=150)
+            plt.close()
+            print(f"    Result saved to {output_name}")
+
+    print("\nBatch processing complete.")
 
 if __name__ == "__main__":
     main()

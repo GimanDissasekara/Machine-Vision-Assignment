@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+import os
 
 def otsu_threshold(image):
     """
@@ -81,7 +82,7 @@ def histogram_equalization_masked(image, mask):
 
 def main():
     # Load image
-    image_path = 'woman_door.jpg'  # Replace with your image path
+    image_path = os.path.join('Sources', 'looking_out.jpg')
     image = cv2.imread(image_path)
     
     if image is None:

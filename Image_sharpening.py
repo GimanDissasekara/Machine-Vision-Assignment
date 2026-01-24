@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+import os
 
 def unsharp_masking(image, sigma=1.0, strength=1.5):
     """
@@ -63,7 +64,7 @@ def main():
     print("="*60)
     
     # Load image
-    image_path = 'image_to_sharpen.jpg'  # Replace with your image
+    image_path = os.path.join('Sources', 'looking_out.jpg')  # Replace with your image
     image = cv2.imread(image_path)
     
     if image is None:

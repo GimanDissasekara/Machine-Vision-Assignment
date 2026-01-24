@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import os
 
 def compute_gaussian_kernel(size, sigma):
     """
@@ -61,7 +62,7 @@ def apply_gaussian_opencv(image, kernel_size, sigma):
 
 def main():
     # Load image
-    image_path = 'sample_image.jpg'  # Replace with your image path
+    image_path = os.path.join('Sources', 'looking_out.jpg')  # Replace with your image path
     image = cv2.imread(image_path)
     
     if image is None:

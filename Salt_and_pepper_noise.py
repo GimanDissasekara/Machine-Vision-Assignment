@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+import os
 
 def add_salt_pepper_noise(image, salt_prob=0.02, pepper_prob=0.02):
     """
@@ -86,7 +87,7 @@ def main():
     print("="*60)
     
     # Load image
-    image_path = 'noisy_image.jpg'  # Replace with your noisy image
+    image_path = os.path.join('Sources', 'emma_salt_pepper.jpg')  # Replace with your noisy image
     image = cv2.imread(image_path)
     
     # If no image, create a test image with noise

@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import time
+import os
 
 def bilateral_filter_manual(image, d, sigma_space, sigma_color):
     """
@@ -70,7 +71,7 @@ def main():
     print("="*60)
     
     # Load image
-    image_path = 'sample_image.jpg'  # Replace with your image
+    image_path = os.path.join('Sources', 'runway.png')  # Replace with your image
     image = cv2.imread(image_path)
     
     if image is None:
