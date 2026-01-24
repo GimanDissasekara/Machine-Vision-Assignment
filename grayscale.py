@@ -1,454 +1,163 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Download } from 'lucide-react';
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
 
-const ImageProcessingSuite = () => {
-  const [image, setImage] = useState(null);
-  const [results, setResults] = useState({});
-  const [otsuThresholdValue, setOtsuThresholdValue] = useState(null);
-  const canvasRef = useRef(null);
-
-  // Load image from file
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const img = new Image();
-        img.onload = () => {
-          setImage(img);
-          processImage(img);
-        };
-        img.src = event.target.result;
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  // Convert to grayscale
-  const toGrayscale = (imageData) => {
-    const data = imageData.data;
-    for (let i = 0; i < data.length; i += 4) {
-      const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-      data[i] = data[i + 1] = data[i + 2] = gray;
-    }
-    return imageData;
-  };
-
-  // Otsu's thresholding
-  const otsuThreshold = (imageData) => {
-    const data = imageData.data;
-    const histogram = new Array(256).fill(0);
+def otsu_threshold(image):
+    """
+    Implement Otsu's thresholding algorithm
+    Returns the optimal threshold value
+    """
+    # Compute histogram
+    histogram, _ = np.histogram(image.flatten(), bins=256, range=[0, 256])
     
-    // Build histogram
-    for (let i = 0; i < data.length; i += 4) {
-      histogram[data[i]]++;
-    }
+    # Total number of pixels
+    total_pixels = image.size
     
-    const total = data.length / 4;
-    let sum = 0;
-    for (let i = 0; i < 256; i++) {
-      sum += i * histogram[i];
-    }
+    # Compute sum of all intensity values
+    sum_total = np.sum(np.arange(256) * histogram)
     
-    let sumB = 0;
-    let wB = 0;
-    let wF = 0;
-    let maxVariance = 0;
-    let threshold = 0;
+    sum_background = 0
+    weight_background = 0
+    max_variance = 0
+    threshold = 0
     
-    for (let t = 0; t < 256; t++) {
-      wB += histogram[t];
-      if (wB === 0) continue;
-      
-      wF = total - wB;
-      if (wF === 0) break;
-      
-      sumB += t * histogram[t];
-      const mB = sumB / wB;
-      const mF = (sum - sumB) / wF;
-      
-      const variance = wB * wF * (mB - mF) * (mB - mF);
-      
-      if (variance > maxVariance) {
-        maxVariance = variance;
-        threshold = t;
-      }
-    }
-    
-    return threshold;
-  };
-
-  // Apply binary mask
-  const applyBinaryMask = (imageData, threshold) => {
-    const data = imageData.data;
-    const mask = new Uint8Array(data.length / 4);
-    
-    for (let i = 0; i < data.length; i += 4) {
-      mask[i / 4] = data[i] > threshold ? 1 : 0;
-      const val = mask[i / 4] * 255;
-      data[i] = data[i + 1] = data[i + 2] = val;
-    }
-    
-    return { imageData, mask };
-  };
-
-  // Histogram equalization
-  const histogramEqualization = (imageData, mask = null) => {
-    const data = imageData.data;
-    const histogram = new Array(256).fill(0);
-    let totalPixels = 0;
-    
-    // Build histogram (only for masked region if mask provided)
-    for (let i = 0; i < data.length; i += 4) {
-      if (mask === null || mask[i / 4] === 1) {
-        histogram[data[i]]++;
-        totalPixels++;
-      }
-    }
-    
-    // Compute CDF
-    const cdf = new Array(256).fill(0);
-    cdf[0] = histogram[0];
-    for (let i = 1; i < 256; i++) {
-      cdf[i] = cdf[i - 1] + histogram[i];
-    }
-    
-    // Normalize CDF
-    const cdfMin = cdf.find(val => val > 0);
-    const lookupTable = new Array(256);
-    for (let i = 0; i < 256; i++) {
-      lookupTable[i] = Math.round(((cdf[i] - cdfMin) / (totalPixels - cdfMin)) * 255);
-    }
-    
-    // Apply equalization
-    const result = new ImageData(
-      new Uint8ClampedArray(data),
-      imageData.width,
-      imageData.height
-    );
-    
-    for (let i = 0; i < result.data.length; i += 4) {
-      if (mask === null || mask[i / 4] === 1) {
-        const newVal = lookupTable[result.data[i]];
-        result.data[i] = result.data[i + 1] = result.data[i + 2] = newVal;
-      }
-    }
-    
-    return result;
-  };
-
-  // Compute Gaussian kernel
-  const computeGaussianKernel = (size, sigma) => {
-    const kernel = [];
-    const center = Math.floor(size / 2);
-    let sum = 0;
-    
-    for (let y = 0; y < size; y++) {
-      const row = [];
-      for (let x = 0; x < size; x++) {
-        const xDist = x - center;
-        const yDist = y - center;
-        const value = Math.exp(-(xDist * xDist + yDist * yDist) / (2 * sigma * sigma));
-        row.push(value);
-        sum += value;
-      }
-      kernel.push(row);
-    }
-    
-    // Normalize
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        kernel[y][x] /= sum;
-      }
-    }
-    
-    return kernel;
-  };
-
-  // Compute derivative of Gaussian kernel
-  const computeDerivativeGaussianKernel = (size, sigma, direction) => {
-    const kernel = [];
-    const center = Math.floor(size / 2);
-    let sum = 0;
-    
-    for (let y = 0; y < size; y++) {
-      const row = [];
-      for (let x = 0; x < size; x++) {
-        const xDist = x - center;
-        const yDist = y - center;
-        const gaussian = Math.exp(-(xDist * xDist + yDist * yDist) / (2 * sigma * sigma));
+    for t in range(256):
+        weight_background += histogram[t]
+        if weight_background == 0:
+            continue
         
-        let value;
-        if (direction === 'x') {
-          value = -(xDist / (sigma * sigma)) * gaussian;
-        } else {
-          value = -(yDist / (sigma * sigma)) * gaussian;
-        }
+        weight_foreground = total_pixels - weight_background
+        if weight_foreground == 0:
+            break
         
-        row.push(value);
-        sum += Math.abs(value);
-      }
-      kernel.push(row);
-    }
-    
-    // Normalize
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        kernel[y][x] /= sum;
-      }
-    }
-    
-    return kernel;
-  };
-
-  // Apply convolution
-  const applyConvolution = (imageData, kernel) => {
-    const width = imageData.width;
-    const height = imageData.height;
-    const data = imageData.data;
-    const result = new ImageData(width, height);
-    const kernelSize = kernel.length;
-    const halfKernel = Math.floor(kernelSize / 2);
-    
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        let sum = 0;
+        sum_background += t * histogram[t]
         
-        for (let ky = 0; ky < kernelSize; ky++) {
-          for (let kx = 0; kx < kernelSize; kx++) {
-            const pixelY = Math.min(Math.max(y + ky - halfKernel, 0), height - 1);
-            const pixelX = Math.min(Math.max(x + kx - halfKernel, 0), width - 1);
-            const pixelIndex = (pixelY * width + pixelX) * 4;
-            sum += data[pixelIndex] * kernel[ky][kx];
-          }
-        }
+        mean_background = sum_background / weight_background
+        mean_foreground = (sum_total - sum_background) / weight_foreground
         
-        const resultIndex = (y * width + x) * 4;
-        result.data[resultIndex] = result.data[resultIndex + 1] = result.data[resultIndex + 2] = Math.max(0, Math.min(255, sum));
-        result.data[resultIndex + 3] = 255;
-      }
-    }
+        # Calculate between-class variance
+        variance = weight_background * weight_foreground * (mean_background - mean_foreground) ** 2
+        
+        if variance > max_variance:
+            max_variance = variance
+            threshold = t
     
-    return result;
-  };
+    return threshold
 
-  // Compute gradient magnitude
-  const computeGradientMagnitude = (gradX, gradY) => {
-    const result = new ImageData(gradX.width, gradX.height);
-    
-    for (let i = 0; i < gradX.data.length; i += 4) {
-      const gx = gradX.data[i] - 128;
-      const gy = gradY.data[i] - 128;
-      const magnitude = Math.sqrt(gx * gx + gy * gy);
-      result.data[i] = result.data[i + 1] = result.data[i + 2] = Math.min(255, magnitude);
-      result.data[i + 3] = 255;
-    }
-    
-    return result;
-  };
+def apply_binary_mask(image, threshold):
+    """
+    Apply binary thresholding
+    Returns binary mask (foreground = 1, background = 0)
+    """
+    mask = (image > threshold).astype(np.uint8)
+    return mask
 
-  const processImage = (img) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
+def histogram_equalization_masked(image, mask):
+    """
+    Apply histogram equalization only to masked region
+    """
+    result = image.copy()
     
-    const originalData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    # Get pixels in the masked region
+    masked_pixels = image[mask == 1]
     
-    // Grayscale
-    const grayData = toGrayscale(new ImageData(
-      new Uint8ClampedArray(originalData.data),
-      originalData.width,
-      originalData.height
-    ));
+    if len(masked_pixels) == 0:
+        return result
     
-    // Otsu thresholding
-    const threshold = otsuThreshold(grayData);
-    setOtsuThreshold(threshold);
+    # Compute histogram for masked region
+    histogram, _ = np.histogram(masked_pixels, bins=256, range=[0, 256])
     
-    const { imageData: binaryData, mask } = applyBinaryMask(
-      new ImageData(new Uint8ClampedArray(grayData.data), grayData.width, grayData.height),
-      threshold
-    );
+    # Compute cumulative distribution function (CDF)
+    cdf = histogram.cumsum()
     
-    // Histogram equalization on foreground
-    const equalizedData = histogramEqualization(
-      new ImageData(new Uint8ClampedArray(grayData.data), grayData.width, grayData.height),
-      mask
-    );
+    # Normalize CDF
+    cdf_min = cdf[cdf > 0].min()
+    cdf_normalized = ((cdf - cdf_min) * 255 / (masked_pixels.size - cdf_min)).astype(np.uint8)
     
-    // Gaussian filtering
-    const gaussianKernel5x5 = computeGaussianKernel(5, 2);
-    const gaussianFiltered = applyConvolution(
-      new ImageData(new Uint8ClampedArray(grayData.data), grayData.width, grayData.height),
-      gaussianKernel5x5
-    );
+    # Apply equalization only to masked pixels
+    result[mask == 1] = cdf_normalized[image[mask == 1]]
     
-    // Derivative of Gaussian
-    const dogKernelX = computeDerivativeGaussianKernel(5, 2, 'x');
-    const dogKernelY = computeDerivativeGaussianKernel(5, 2, 'y');
-    
-    const gradX = applyConvolution(
-      new ImageData(new Uint8ClampedArray(grayData.data), grayData.width, grayData.height),
-      dogKernelX
-    );
-    
-    const gradY = applyConvolution(
-      new ImageData(new Uint8ClampedArray(grayData.data), grayData.width, grayData.height),
-      dogKernelY
-    );
-    
-    const gradMagnitude = computeGradientMagnitude(gradX, gradY);
-    
-    setResults({
-      grayscale: grayData,
-      binary: binaryData,
-      equalized: equalizedData,
-      gaussianFiltered,
-      gradX,
-      gradY,
-      gradMagnitude,
-      gaussianKernel5x5,
-      dogKernelX,
-      dogKernelY
-    });
-  };
+    return result
 
-  const downloadCanvas = (imageData, filename) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = imageData.width;
-    canvas.height = imageData.height;
-    const ctx = canvas.getContext('2d');
-    ctx.putImageData(imageData, 0, 0);
+def main():
+    # Load image
+    image_path = 'woman_door.jpg'  # Replace with your image path
+    image = cv2.imread(image_path)
     
-    canvas.toBlob((blob) => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
-    });
-  };
-
-  const ResultImage = ({ imageData, title, showDownload = true }) => {
-    const canvasRef = useRef(null);
+    if image is None:
+        print(f"Error: Could not load image from {image_path}")
+        return
     
-    useEffect(() => {
-      if (canvasRef.current && imageData) {
-        const ctx = canvasRef.current.getContext('2d');
-        ctx.putImageData(imageData, 0, 0);
-      }
-    }, [imageData]);
+    # Convert to grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     
-    return (
-      <div className="border rounded p-2">
-        <div className="flex justify-between items-center mb-2">
-          <h3 className="font-semibold text-sm">{title}</h3>
-          {showDownload && (
-            <button
-              onClick={() => downloadCanvas(imageData, `${title}.png`)}
-              className="p-1 hover:bg-gray-100 rounded"
-            >
-              <Download size={16} />
-            </button>
-          )}
-        </div>
-        <canvas
-          ref={canvasRef}
-          width={imageData?.width || 0}
-          height={imageData?.height || 0}
-          className="w-full border"
-        />
-      </div>
-    );
-  };
+    # (a) Apply Otsu's thresholding
+    threshold_value = otsu_threshold(gray)
+    print(f"(a) Otsu Threshold Value: {threshold_value}")
+    
+    # Create binary mask
+    mask = apply_binary_mask(gray, threshold_value)
+    binary_image = (mask * 255).astype(np.uint8)
+    
+    # (b) Apply histogram equalization to foreground only
+    equalized = histogram_equalization_masked(gray, mask)
+    
+    # Display results
+    plt.figure(figsize=(15, 10))
+    
+    plt.subplot(2, 3, 1)
+    plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+    plt.title('Original Image')
+    plt.axis('off')
+    
+    plt.subplot(2, 3, 2)
+    plt.imshow(gray, cmap='gray')
+    plt.title('Grayscale Image')
+    plt.axis('off')
+    
+    plt.subplot(2, 3, 3)
+    plt.imshow(binary_image, cmap='gray')
+    plt.title(f'Binary Mask (Otsu)\nThreshold = {threshold_value}')
+    plt.axis('off')
+    
+    plt.subplot(2, 3, 4)
+    plt.hist(gray.flatten(), bins=256, range=[0, 256], color='blue', alpha=0.7)
+    plt.axvline(x=threshold_value, color='red', linestyle='--', linewidth=2, label=f'Threshold={threshold_value}')
+    plt.title('Histogram with Otsu Threshold')
+    plt.xlabel('Pixel Intensity')
+    plt.ylabel('Frequency')
+    plt.legend()
+    
+    plt.subplot(2, 3, 5)
+    plt.imshow(equalized, cmap='gray')
+    plt.title('Foreground Histogram Equalized')
+    plt.axis('off')
+    
+    plt.subplot(2, 3, 6)
+    # Show difference
+    difference = np.abs(equalized.astype(float) - gray.astype(float))
+    plt.imshow(difference, cmap='hot')
+    plt.title('Difference (Equalized - Original)')
+    plt.axis('off')
+    plt.colorbar()
+    
+    plt.tight_layout()
+    plt.savefig('q4_results.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    
+    print("\n(b) Hidden Features Revealed:")
+    print("- Texture details in clothing and fabric patterns")
+    print("- Facial features and skin tones in shadowed areas")
+    print("- Room details like furniture textures and wall patterns")
+    print("- Enhanced contrast in previously dark regions")
+    print("- Better edge definition between objects")
+    
+    # Save individual results
+    cv2.imwrite('q4_grayscale.png', gray)
+    cv2.imwrite('q4_binary_mask.png', binary_image)
+    cv2.imwrite('q4_equalized.png', equalized)
+    
+    print("\nResults saved as: q4_results.png, q4_grayscale.png, q4_binary_mask.png, q4_equalized.png")
 
-  const KernelDisplay = ({ kernel, title }) => (
-    <div className="border rounded p-3">
-      <h3 className="font-semibold mb-2">{title}</h3>
-      <div className="overflow-auto max-h-64">
-        <table className="text-xs border-collapse">
-          <tbody>
-            {kernel.map((row, i) => (
-              <tr key={i}>
-                {row.map((val, j) => (
-                  <td key={j} className="border px-1 text-center">
-                    {val.toFixed(4)}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="max-w-7xl mx-auto p-6">
-      <h1 className="text-3xl font-bold mb-6">Image Processing Suite</h1>
-      
-      <div className="mb-6">
-        <label className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded cursor-pointer hover:bg-blue-600 w-fit">
-          <Upload size={20} />
-          <span>Upload Image</span>
-          <input
-            type="file"
-            accept="image/*"
-            onChange={handleImageUpload}
-            className="hidden"
-          />
-        </label>
-      </div>
-
-      {otsuThreshold !== null && (
-        <div className="mb-6 p-4 bg-blue-50 rounded">
-          <h2 className="font-semibold text-lg mb-2">Results Summary</h2>
-          <p><strong>Otsu Threshold Value:</strong> {otsuThreshold}</p>
-          <p className="mt-2 text-sm"><strong>Hidden Features Revealed:</strong> Histogram equalization on the foreground enhances contrast, revealing texture details in the woman's clothing, facial features, and room details that were previously obscured in darker regions.</p>
-        </div>
-      )}
-
-      {results.grayscale && (
-        <>
-          <h2 className="text-2xl font-bold mb-4">Problem 4: Otsu Thresholding & Histogram Equalization</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            <ResultImage imageData={results.grayscale} title="Grayscale" />
-            <ResultImage imageData={results.binary} title="Otsu Binary Mask" />
-            <ResultImage imageData={results.equalized} title="Foreground Equalized" />
-          </div>
-
-          <h2 className="text-2xl font-bold mb-4">Problem 5: Gaussian Filtering</h2>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-            <KernelDisplay kernel={results.gaussianKernel5x5} title="5×5 Gaussian Kernel (σ=2)" />
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-            <ResultImage imageData={results.grayscale} title="Original Grayscale" />
-            <ResultImage imageData={results.gaussianFiltered} title="Gaussian Filtered" />
-          </div>
-
-          <h2 className="text-2xl font-bold mb-4">Problem 6: Derivative of Gaussian</h2>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-            <KernelDisplay kernel={results.dogKernelX} title="5×5 DoG Kernel (X-direction, σ=2)" />
-            <KernelDisplay kernel={results.dogKernelY} title="5×5 DoG Kernel (Y-direction, σ=2)" />
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-            <ResultImage imageData={results.gradX} title="Gradient X" />
-            <ResultImage imageData={results.gradY} title="Gradient Y" />
-            <ResultImage imageData={results.gradMagnitude} title="Gradient Magnitude" />
-          </div>
-        </>
-      )}
-
-      {!image && (
-        <div className="text-center text-gray-500 py-12">
-          <p>Upload an image to begin processing</p>
-        </div>
-      )}
-    </div>
-  );
-};
-
-export default ImageProcessingSuite;
+if __name__ == "__main__":
+    main()

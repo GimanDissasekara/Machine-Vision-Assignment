@@ -1,411 +1,262 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Download } from 'lucide-react';
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+import time
 
-const BilateralFiltering = () => {
-  const [image, setImage] = useState(null);
-  const [results, setResults] = useState({});
-  const [diameter, setDiameter] = useState(9);
-  const [sigmaSpace, setSigmaSpace] = useState(75);
-  const [sigmaColor, setSigmaColor] = useState(75);
-  const [processing, setProcessing] = useState(false);
-
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const img = new Image();
-        img.onload = () => {
-          setImage(img);
-          processImage(img, diameter, sigmaSpace, sigmaColor);
-        };
-        img.src = event.target.result;
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleParameterChange = (d, sigS, sigC) => {
-    if (image) {
-      processImage(image, d, sigS, sigC);
-    }
-  };
-
-  const getImageData = (img) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    return ctx.getImageData(0, 0, canvas.width, canvas.height);
-  };
-
-  const toGrayscale = (imageData) => {
-    const result = new ImageData(imageData.width, imageData.height);
-    for (let i = 0; i < imageData.data.length; i += 4) {
-      const gray = 0.299 * imageData.data[i] + 0.587 * imageData.data[i + 1] + 0.114 * imageData.data[i + 2];
-      result.data[i] = result.data[i + 1] = result.data[i + 2] = gray;
-      result.data[i + 3] = 255;
-    }
-    return result;
-  };
-
-  const computeGaussianKernel = (size, sigma) => {
-    const kernel = [];
-    const center = Math.floor(size / 2);
-    let sum = 0;
+def bilateral_filter_manual(image, d, sigma_space, sigma_color):
+    """
+    (a) Manual implementation of bilateral filter for grayscale images
     
-    for (let y = 0; y < size; y++) {
-      const row = [];
-      for (let x = 0; x < size; x++) {
-        const xDist = x - center;
-        const yDist = y - center;
-        const value = Math.exp(-(xDist * xDist + yDist * yDist) / (2 * sigma * sigma));
-        row.push(value);
-        sum += value;
-      }
-      kernel.push(row);
-    }
+    Parameters:
+    - image: input grayscale image
+    - d: diameter of pixel neighborhood
+    - sigma_space: spatial standard deviation (σs)
+    - sigma_color: range/intensity standard deviation (σr)
     
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        kernel[y][x] /= sum;
-      }
-    }
+    Returns:
+    - filtered image
+    """
+    print(f"  Applying bilateral filter: d={d}, σs={sigma_space}, σr={sigma_color}")
     
-    return kernel;
-  };
-
-  const applyGaussianFilter = (imageData, kernelSize, sigma) => {
-    const kernel = computeGaussianKernel(kernelSize, sigma);
-    const width = imageData.width;
-    const height = imageData.height;
-    const data = imageData.data;
-    const result = new ImageData(width, height);
-    const halfKernel = Math.floor(kernelSize / 2);
+    height, width = image.shape
+    filtered = np.zeros_like(image, dtype=np.float64)
     
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        let r = 0, g = 0, b = 0;
+    radius = d // 2
+    
+    # Pre-compute spatial Gaussian weights
+    spatial_coeff = -0.5 / (sigma_space ** 2)
+    range_coeff = -0.5 / (sigma_color ** 2)
+    
+    # Process each pixel
+    for i in range(height):
+        if i % 50 == 0:
+            print(f"    Processing row {i}/{height}")
         
-        for (let ky = 0; ky < kernelSize; ky++) {
-          for (let kx = 0; kx < kernelSize; kx++) {
-            const pixelY = Math.min(Math.max(y + ky - halfKernel, 0), height - 1);
-            const pixelX = Math.min(Math.max(x + kx - halfKernel, 0), width - 1);
-            const pixelIndex = (pixelY * width + pixelX) * 4;
-            const weight = kernel[ky][kx];
+        for j in range(width):
+            center_intensity = image[i, j]
             
-            r += data[pixelIndex] * weight;
-            g += data[pixelIndex + 1] * weight;
-            b += data[pixelIndex + 2] * weight;
-          }
-        }
+            weighted_sum = 0.0
+            weight_sum = 0.0
+            
+            # Iterate over neighborhood
+            for ki in range(-radius, radius + 1):
+                for kj in range(-radius, radius + 1):
+                    # Get neighbor coordinates with boundary handling
+                    ni = min(max(i + ki, 0), height - 1)
+                    nj = min(max(j + kj, 0), width - 1)
+                    
+                    neighbor_intensity = image[ni, nj]
+                    
+                    # Compute spatial distance
+                    spatial_dist = ki * ki + kj * kj
+                    spatial_weight = np.exp(spatial_dist * spatial_coeff)
+                    
+                    # Compute intensity difference
+                    intensity_diff = neighbor_intensity - center_intensity
+                    range_weight = np.exp(intensity_diff * intensity_diff * range_coeff)
+                    
+                    # Combined weight
+                    weight = spatial_weight * range_weight
+                    
+                    weighted_sum += neighbor_intensity * weight
+                    weight_sum += weight
+            
+            filtered[i, j] = weighted_sum / weight_sum
+    
+    return filtered.astype(np.uint8)
+
+def main():
+    print("Question 10: Bilateral Filtering")
+    print("="*60)
+    
+    # Load image
+    image_path = 'sample_image.jpg'  # Replace with your image
+    image = cv2.imread(image_path)
+    
+    if image is None:
+        print(f"Could not load {image_path}, creating test image...")
+        # Create a test image with edges and noise
+        image = np.ones((200, 200, 3), dtype=np.uint8) * 128
+        cv2.rectangle(image, (50, 50), (150, 150), (255, 255, 255), -1)
+        cv2.circle(image, (100, 100), 30, (0, 0, 0), -1)
         
-        const resultIndex = (y * width + x) * 4;
-        result.data[resultIndex] = r;
-        result.data[resultIndex + 1] = g;
-        result.data[resultIndex + 2] = b;
-        result.data[resultIndex + 3] = 255;
-      }
-    }
-    
-    return result;
-  };
-
-  const bilateralFilterManual = (imageData, d, sigmaS, sigmaR) => {
-    const width = imageData.width;
-    const height = imageData.height;
-    const data = imageData.data;
-    const result = new ImageData(width, height);
-    const radius = Math.floor(d / 2);
-    
-    const spatialCoeff = -0.5 / (sigmaS * sigmaS);
-    const rangeCoeff = -0.5 / (sigmaR * sigmaR);
-    
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const centerIdx = (y * width + x) * 4;
-        const centerR = data[centerIdx];
-        const centerG = data[centerIdx + 1];
-        const centerB = data[centerIdx + 2];
+        # Add Gaussian noise
+        noise = np.random.normal(0, 25, image.shape)
+        image = np.clip(image + noise, 0, 255).astype(np.uint8)
         
-        let sumR = 0, sumG = 0, sumB = 0;
-        let sumWeight = 0;
-        
-        for (let ky = -radius; ky <= radius; ky++) {
-          for (let kx = -radius; kx <= radius; kx++) {
-            const pixelY = Math.min(Math.max(y + ky, 0), height - 1);
-            const pixelX = Math.min(Math.max(x + kx, 0), width - 1);
-            const pixelIdx = (pixelY * width + pixelX) * 4;
-            
-            const spatialDist = kx * kx + ky * ky;
-            const spatialWeight = Math.exp(spatialDist * spatialCoeff);
-            
-            const colorDistR = data[pixelIdx] - centerR;
-            const colorDistG = data[pixelIdx + 1] - centerG;
-            const colorDistB = data[pixelIdx + 2] - centerB;
-            const colorDist = colorDistR * colorDistR + colorDistG * colorDistG + colorDistB * colorDistB;
-            const rangeWeight = Math.exp(colorDist * rangeCoeff);
-            
-            const weight = spatialWeight * rangeWeight;
-            
-            sumR += data[pixelIdx] * weight;
-            sumG += data[pixelIdx + 1] * weight;
-            sumB += data[pixelIdx + 2] * weight;
-            sumWeight += weight;
-          }
-        }
-        
-        result.data[centerIdx] = sumR / sumWeight;
-        result.data[centerIdx + 1] = sumG / sumWeight;
-        result.data[centerIdx + 2] = sumB / sumWeight;
-        result.data[centerIdx + 3] = 255;
-      }
-    }
+        cv2.imwrite('test_noisy_image.jpg', image)
+        print("Created test noisy image")
     
-    return result;
-  };
-
-  const processImage = async (img, d, sigS, sigC) => {
-    setProcessing(true);
+    # Convert to grayscale
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image.copy()
     
-    setTimeout(() => {
-      const imageData = getImageData(img);
-      const grayData = toGrayscale(imageData);
-      
-      const gaussianFiltered = applyGaussianFilter(
-        new ImageData(new Uint8ClampedArray(grayData.data), grayData.width, grayData.height),
-        9,
-        2.0
-      );
-      
-      const bilateralFiltered = bilateralFilterManual(
-        new ImageData(new Uint8ClampedArray(grayData.data), grayData.width, grayData.height),
-        d,
-        sigS,
-        sigC
-      );
-      
-      setResults({
-        original: imageData,
-        grayscale: grayData,
-        gaussian: gaussianFiltered,
-        bilateral: bilateralFiltered
-      });
-      
-      setProcessing(false);
-    }, 100);
-  };
-
-  const downloadCanvas = (imageData, filename) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = imageData.width;
-    canvas.height = imageData.height;
-    const ctx = canvas.getContext('2d');
-    ctx.putImageData(imageData, 0, 0);
+    print(f"Image shape: {gray.shape}")
     
-    canvas.toBlob((blob) => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
-    });
-  };
-
-  const ResultImage = ({ imageData, title }) => {
-    const canvasRef = useRef(null);
+    # Parameters for bilateral filter
+    d = 9  # Diameter
+    sigma_space = 75  # Spatial sigma
+    sigma_color = 75  # Range/color sigma
     
-    useEffect(() => {
-      if (canvasRef.current && imageData) {
-        const ctx = canvasRef.current.getContext('2d');
-        ctx.putImageData(imageData, 0, 0);
-      }
-    }, [imageData]);
+    print("\n" + "="*60)
+    print("BILATERAL FILTER THEORY")
+    print("="*60)
+    print("Formula: BF[I]_p = (1/W_p) * Σ G_s(||p-q||) * G_r(|I_p - I_q|) * I_q")
+    print("\nWhere:")
+    print("  G_s: Spatial Gaussian kernel (based on distance)")
+    print("  G_r: Range Gaussian kernel (based on intensity difference)")
+    print("  W_p: Normalization factor (sum of all weights)")
+    print("\nKey Properties:")
+    print("  • Non-linear filter")
+    print("  • Edge-preserving smoothing")
+    print("  • Combines spatial and range filtering")
+    print("="*60)
     
-    return (
-      <div className="border rounded p-3">
-        <div className="flex justify-between items-center mb-2">
-          <h3 className="font-semibold text-sm">{title}</h3>
-          <button
-            onClick={() => downloadCanvas(imageData, `${title}.png`)}
-            className="p-1 hover:bg-gray-100 rounded"
-            title="Download"
-          >
-            <Download size={16} />
-          </button>
-        </div>
-        <canvas
-          ref={canvasRef}
-          width={imageData?.width || 0}
-          height={imageData?.height || 0}
-          className="w-full border"
-        />
-      </div>
-    );
-  };
+    # (a) Manual bilateral filter
+    print("\n(a) Applying manual bilateral filter...")
+    start_time = time.time()
+    bilateral_manual = bilateral_filter_manual(gray, d, sigma_space, sigma_color)
+    manual_time = time.time() - start_time
+    print(f"  Manual implementation time: {manual_time:.2f} seconds")
+    
+    # (b) Gaussian blur using OpenCV
+    print("\n(b) Applying Gaussian smoothing (OpenCV)...")
+    start_time = time.time()
+    gaussian_opencv = cv2.GaussianBlur(gray, (9, 9), 0)
+    gaussian_time = time.time() - start_time
+    print(f"  Gaussian blur time: {gaussian_time:.4f} seconds")
+    
+    # (c) Bilateral filter using OpenCV
+    print("\n(c) Applying bilateral filter (OpenCV)...")
+    start_time = time.time()
+    bilateral_opencv = cv2.bilateralFilter(gray, d, sigma_color, sigma_space)
+    opencv_time = time.time() - start_time
+    print(f"  OpenCV bilateral time: {opencv_time:.4f} seconds")
+    
+    # (d) Compare manual vs OpenCV bilateral
+    print("\n(d) Comparing manual vs OpenCV implementation...")
+    difference = np.abs(bilateral_manual.astype(float) - bilateral_opencv.astype(float))
+    mean_diff = np.mean(difference)
+    max_diff = np.max(difference)
+    print(f"  Mean absolute difference: {mean_diff:.4f}")
+    print(f"  Max absolute difference: {max_diff:.4f}")
+    print(f"  Speedup (OpenCV vs Manual): {manual_time/opencv_time:.1f}x")
+    
+    # Display results - Main comparison
+    fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+    
+    axes[0, 0].imshow(gray, cmap='gray')
+    axes[0, 0].set_title('Original Grayscale Image')
+    axes[0, 0].axis('off')
+    
+    axes[0, 1].imshow(gaussian_opencv, cmap='gray')
+    axes[0, 1].set_title(f'(b) Gaussian Blur (OpenCV)\nTime: {gaussian_time:.4f}s')
+    axes[0, 1].axis('off')
+    
+    axes[0, 2].imshow(bilateral_manual, cmap='gray')
+    axes[0, 2].set_title(f'(a,d) Bilateral Filter (Manual)\nTime: {manual_time:.2f}s')
+    axes[0, 2].axis('off')
+    
+    axes[1, 0].imshow(bilateral_opencv, cmap='gray')
+    axes[1, 0].set_title(f'(c) Bilateral Filter (OpenCV)\nTime: {opencv_time:.4f}s')
+    axes[1, 0].axis('off')
+    
+    axes[1, 1].imshow(difference, cmap='hot')
+    axes[1, 1].set_title(f'Difference (Manual - OpenCV)\nMean: {mean_diff:.2f}')
+    axes[1, 1].axis('off')
+    cbar1 = plt.colorbar(axes[1, 1].imshow(difference, cmap='hot'), ax=axes[1, 1])
+    
+    # Show difference between Gaussian and Bilateral
+    diff_gaussian_bilateral = np.abs(gaussian_opencv.astype(float) - bilateral_opencv.astype(float))
+    axes[1, 2].imshow(diff_gaussian_bilateral, cmap='hot')
+    axes[1, 2].set_title('Difference (Gaussian - Bilateral)')
+    axes[1, 2].axis('off')
+    cbar2 = plt.colorbar(axes[1, 2].imshow(diff_gaussian_bilateral, cmap='hot'), ax=axes[1, 2])
+    
+    plt.tight_layout()
+    plt.savefig('q10_bilateral_comparison.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    
+    # Zoomed comparison to see edge preservation
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    
+    h, w = gray.shape
+    y1, y2 = h//3, 2*h//3
+    x1, x2 = w//3, 2*w//3
+    
+    axes[0].imshow(gray[y1:y2, x1:x2], cmap='gray')
+    axes[0].set_title('Original (Zoomed)')
+    axes[0].axis('off')
+    
+    axes[1].imshow(gaussian_opencv[y1:y2, x1:x2], cmap='gray')
+    axes[1].set_title('Gaussian (Zoomed)\nBlurs edges')
+    axes[1].axis('off')
+    
+    axes[2].imshow(bilateral_opencv[y1:y2, x1:x2], cmap='gray')
+    axes[2].set_title('Bilateral (Zoomed)\nPreserves edges')
+    axes[2].axis('off')
+    
+    plt.tight_layout()
+    plt.savefig('q10_edge_preservation.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    
+    # Analysis
+    print("\n" + "="*60)
+    print("ANALYSIS: GAUSSIAN vs BILATERAL FILTERING")
+    print("="*60)
+    
+    print("\nGAUSSIAN FILTER:")
+    print("  • Linear filter")
+    print("  • Only considers spatial distance")
+    print("  • Weight formula: w(p,q) = exp(-||p-q||²/(2σ²))")
+    print("  • Smooths uniformly across entire image")
+    print("  • BLURS EDGES along with noise")
+    print("  • Fast computation (separable)")
+    print("  • Use case: General smoothing, pre-processing")
+    
+    print("\nBILATERAL FILTER:")
+    print("  • Non-linear filter")
+    print("  • Considers BOTH spatial distance AND intensity similarity")
+    print("  • Weight formula: w(p,q) = G_s(||p-q||) × G_r(|I_p - I_q|)")
+    print("  • Smooths flat regions, PRESERVES edges")
+    print("  • Slower computation (non-separable)")
+    print("  • Use case: Noise reduction while keeping edges sharp")
+    
+    print("\n" + "-"*60)
+    print("KEY INSIGHT:")
+    print("-"*60)
+    print("At an edge, pixels have DIFFERENT intensities.")
+    print("• Gaussian: Averages them anyway → blurred edge")
+    print("• Bilateral: Low range weight → edge preserved")
+    print("\nAt a flat region, pixels have SIMILAR intensities.")
+    print("• Both filters: High weights → effective smoothing")
+    print("="*60)
+    
+    print("\nPARAMETER GUIDELINES:")
+    print("-"*60)
+    print("σ_space (Spatial):")
+    print("  • Larger → considers more distant neighbors")
+    print("  • Typical: 50-150")
+    print("\nσ_color (Range/Intensity):")
+    print("  • Larger → tolerates more intensity difference")
+    print("  • Small σ_color → very strong edge preservation")
+    print("  • Large σ_color → closer to Gaussian blur")
+    print("  • Typical: 50-150")
+    print("\nDiameter (d):")
+    print("  • Defines neighborhood size")
+    print("  • Typical: 5, 7, 9")
+    print("="*60)
+    
+    # Save results
+    cv2.imwrite('q10_bilateral_manual.png', bilateral_manual)
+    cv2.imwrite('q10_bilateral_opencv.png', bilateral_opencv)
+    cv2.imwrite('q10_gaussian_opencv.png', gaussian_opencv)
+    
+    print("\nResults saved!")
+    print("\nNOTE: Manual implementation is much slower than OpenCV's")
+    print("      optimized version, but produces equivalent results.")
 
-  return (
-    <div className="max-w-7xl mx-auto p-6">
-      <h1 className="text-3xl font-bold mb-2">Question 10: Bilateral Filtering</h1>
-      <p className="text-gray-600 mb-6">
-        Edge-preserving smoothing using bilateral filter with spatial and range components.
-      </p>
-
-      <div className="mb-6">
-        <label className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded cursor-pointer hover:bg-blue-600 w-fit">
-          <Upload size={20} />
-          <span>Upload Image</span>
-          <input
-            type="file"
-            accept="image/*"
-            onChange={handleImageUpload}
-            className="hidden"
-          />
-        </label>
-      </div>
-
-      <div className="mb-6 p-4 bg-gray-50 rounded space-y-4">
-        <div>
-          <label className="block mb-2 font-semibold">
-            Kernel Diameter: {diameter}
-          </label>
-          <input
-            type="range"
-            min="3"
-            max="15"
-            step="2"
-            value={diameter}
-            onChange={(e) => {
-              const val = parseInt(e.target.value);
-              setDiameter(val);
-              handleParameterChange(val, sigmaSpace, sigmaColor);
-            }}
-            className="w-full"
-            disabled={processing}
-          />
-          <div className="flex justify-between text-xs text-gray-600 mt-1">
-            <span>3</span>
-            <span>9</span>
-            <span>15</span>
-          </div>
-        </div>
-
-        <div>
-          <label className="block mb-2 font-semibold">
-            Spatial Sigma (σₛ): {sigmaSpace}
-          </label>
-          <input
-            type="range"
-            min="10"
-            max="200"
-            step="5"
-            value={sigmaSpace}
-            onChange={(e) => {
-              const val = parseInt(e.target.value);
-              setSigmaSpace(val);
-              handleParameterChange(diameter, val, sigmaColor);
-            }}
-            className="w-full"
-            disabled={processing}
-          />
-          <div className="flex justify-between text-xs text-gray-600 mt-1">
-            <span>10</span>
-            <span>100</span>
-            <span>200</span>
-          </div>
-          <p className="text-xs text-gray-600 mt-1">Controls spatial smoothing (distance-based)</p>
-        </div>
-
-        <div>
-          <label className="block mb-2 font-semibold">
-            Range/Intensity Sigma (σᵣ): {sigmaColor}
-          </label>
-          <input
-            type="range"
-            min="10"
-            max="200"
-            step="5"
-            value={sigmaColor}
-            onChange={(e) => {
-              const val = parseInt(e.target.value);
-              setSigmaColor(val);
-              handleParameterChange(diameter, sigmaSpace, val);
-            }}
-            className="w-full"
-            disabled={processing}
-          />
-          <div className="flex justify-between text-xs text-gray-600 mt-1">
-            <span>10</span>
-            <span>100</span>
-            <span>200</span>
-          </div>
-          <p className="text-xs text-gray-600 mt-1">Controls edge preservation (intensity-based)</p>
-        </div>
-
-        {processing && (
-          <div className="text-center text-blue-600 font-semibold">
-            Processing... This may take a moment for large images.
-          </div>
-        )}
-      </div>
-
-      {results.original && (
-        <>
-          <div className="mb-6 p-4 bg-blue-50 border-l-4 border-blue-500 rounded">
-            <h2 className="font-semibold text-lg mb-2">How Bilateral Filtering Works</h2>
-            <div className="text-sm space-y-2">
-              <p><strong>Formula:</strong> BF[I]ₚ = (1/Wₚ) Σ Gₛ(‖p-q‖) · Gᵣ(|Iₚ-Iᵧ|) · Iᵧ</p>
-              <p><strong>Two Components:</strong></p>
-              <ul className="list-disc ml-6">
-                <li><strong>Spatial Weight Gₛ:</strong> Gaussian based on spatial distance (like regular Gaussian blur)</li>
-                <li><strong>Range Weight Gᵣ:</strong> Gaussian based on intensity difference (preserves edges)</li>
-              </ul>
-              <p><strong>Key Insight:</strong> Pixels are averaged based on both proximity AND similarity in intensity. This smooths flat regions while preserving edges where intensity changes rapidly.</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <ResultImage imageData={results.original} title="Original Image" />
-            <ResultImage imageData={results.grayscale} title="Grayscale" />
-            <ResultImage imageData={results.gaussian} title="(b) Gaussian Smoothing" />
-            <ResultImage imageData={results.bilateral} title="(a,d) Manual Bilateral Filter" />
-          </div>
-
-          <div className="p-4 bg-yellow-50 border-l-4 border-yellow-500 rounded">
-            <h3 className="font-semibold mb-2">Comparison: Gaussian vs Bilateral</h3>
-            <div className="text-sm space-y-2">
-              <p><strong>Gaussian Filter:</strong></p>
-              <ul className="list-disc ml-6">
-                <li>Only considers spatial distance</li>
-                <li>Blurs everything uniformly, including edges</li>
-                <li>Faster to compute</li>
-                <li>Good for uniform noise reduction</li>
-              </ul>
-              <p className="mt-2"><strong>Bilateral Filter:</strong></p>
-              <ul className="list-disc ml-6">
-                <li>Considers both spatial distance AND intensity similarity</li>
-                <li>Preserves edges while smoothing flat regions</li>
-                <li>Slower (non-linear filter)</li>
-                <li>Excellent for noise reduction while maintaining detail</li>
-                <li>Popular in computational photography and tone mapping</li>
-              </ul>
-              <p className="mt-2 font-semibold">Note: (c) OpenCV's cv.bilateralFilter() would produce similar results to our manual implementation with optimized performance.</p>
-            </div>
-          </div>
-        </>
-      )}
-
-      {!image && (
-        <div className="text-center text-gray-500 py-12 border-2 border-dashed rounded">
-          <Upload size={48} className="mx-auto mb-4 opacity-50" />
-          <p>Upload an image to apply bilateral filtering</p>
-          <p className="text-sm mt-2">Best for edge-preserving noise reduction</p>
-        </div>
-      )}
-    </div>
-  );
-};
-
-export default BilateralFiltering;
+if __name__ == "__main__":
+    main()

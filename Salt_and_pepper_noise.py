@@ -1,326 +1,231 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Download } from 'lucide-react';
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
 
-const NoiseFiltering = () => {
-  const [image, setImage] = useState(null);
-  const [results, setResults] = useState({});
-  const [kernelSize, setKernelSize] = useState(5);
-  const [sigma, setSigma] = useState(1.5);
-
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const img = new Image();
-        img.onload = () => {
-          setImage(img);
-          processImage(img, kernelSize, sigma);
-        };
-        img.src = event.target.result;
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleParameterChange = (newKernelSize, newSigma) => {
-    if (image) {
-      processImage(image, newKernelSize, newSigma);
-    }
-  };
-
-  const getImageData = (img) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    return ctx.getImageData(0, 0, canvas.width, canvas.height);
-  };
-
-  const computeGaussianKernel = (size, sigma) => {
-    const kernel = [];
-    const center = Math.floor(size / 2);
-    let sum = 0;
+def add_salt_pepper_noise(image, salt_prob=0.02, pepper_prob=0.02):
+    """
+    Add salt and pepper noise to an image for testing
+    """
+    noisy = image.copy()
     
-    for (let y = 0; y < size; y++) {
-      const row = [];
-      for (let x = 0; x < size; x++) {
-        const xDist = x - center;
-        const yDist = y - center;
-        const value = Math.exp(-(xDist * xDist + yDist * yDist) / (2 * sigma * sigma));
-        row.push(value);
-        sum += value;
-      }
-      kernel.push(row);
-    }
+    # Salt noise (white pixels)
+    salt_mask = np.random.random(image.shape[:2]) < salt_prob
+    noisy[salt_mask] = 255
     
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        kernel[y][x] /= sum;
-      }
-    }
+    # Pepper noise (black pixels)
+    pepper_mask = np.random.random(image.shape[:2]) < pepper_prob
+    noisy[pepper_mask] = 0
     
-    return kernel;
-  };
+    return noisy
 
-  const applyGaussianFilter = (imageData, kernelSize, sigma) => {
-    const kernel = computeGaussianKernel(kernelSize, sigma);
-    const width = imageData.width;
-    const height = imageData.height;
-    const data = imageData.data;
-    const result = new ImageData(width, height);
-    const halfKernel = Math.floor(kernelSize / 2);
+def gaussian_filter_manual(image, kernel_size=5, sigma=1.5):
+    """
+    (a) Apply Gaussian smoothing manually
+    """
+    # Create Gaussian kernel
+    kernel = np.zeros((kernel_size, kernel_size))
+    center = kernel_size // 2
     
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        let r = 0, g = 0, b = 0;
+    for i in range(kernel_size):
+        for j in range(kernel_size):
+            x = i - center
+            y = j - center
+            kernel[i, j] = np.exp(-(x**2 + y**2) / (2 * sigma**2))
+    
+    # Normalize
+    kernel = kernel / np.sum(kernel)
+    
+    # Apply filter
+    filtered = cv2.filter2D(image, -1, kernel)
+    
+    return filtered
+
+def median_filter_manual(image, kernel_size=5):
+    """
+    (b) Apply median filter manually
+    """
+    height, width = image.shape[:2]
+    pad = kernel_size // 2
+    
+    # Pad image
+    if len(image.shape) == 3:
+        padded = np.pad(image, ((pad, pad), (pad, pad), (0, 0)), mode='edge')
+        filtered = np.zeros_like(image)
         
-        for (let ky = 0; ky < kernelSize; ky++) {
-          for (let kx = 0; kx < kernelSize; kx++) {
-            const pixelY = Math.min(Math.max(y + ky - halfKernel, 0), height - 1);
-            const pixelX = Math.min(Math.max(x + kx - halfKernel, 0), width - 1);
-            const pixelIndex = (pixelY * width + pixelX) * 4;
-            const weight = kernel[ky][kx];
-            
-            r += data[pixelIndex] * weight;
-            g += data[pixelIndex + 1] * weight;
-            b += data[pixelIndex + 2] * weight;
-          }
-        }
+        for i in range(height):
+            for j in range(width):
+                for c in range(image.shape[2]):
+                    window = padded[i:i+kernel_size, j:j+kernel_size, c]
+                    filtered[i, j, c] = np.median(window)
+    else:
+        padded = np.pad(image, pad, mode='edge')
+        filtered = np.zeros_like(image)
         
-        const resultIndex = (y * width + x) * 4;
-        result.data[resultIndex] = r;
-        result.data[resultIndex + 1] = g;
-        result.data[resultIndex + 2] = b;
-        result.data[resultIndex + 3] = 255;
-      }
-    }
+        for i in range(height):
+            for j in range(width):
+                window = padded[i:i+kernel_size, j:j+kernel_size]
+                filtered[i, j] = np.median(window)
     
-    return result;
-  };
+    return filtered
 
-  const applyMedianFilter = (imageData, kernelSize) => {
-    const width = imageData.width;
-    const height = imageData.height;
-    const data = imageData.data;
-    const result = new ImageData(width, height);
-    const halfKernel = Math.floor(kernelSize / 2);
+def compute_psnr(original, filtered):
+    """
+    Compute Peak Signal-to-Noise Ratio
+    """
+    mse = np.mean((original.astype(float) - filtered.astype(float)) ** 2)
+    if mse == 0:
+        return float('inf')
     
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const rValues = [];
-        const gValues = [];
-        const bValues = [];
+    max_pixel = 255.0
+    psnr = 20 * np.log10(max_pixel / np.sqrt(mse))
+    
+    return psnr
+
+def main():
+    print("Question 8: Salt & Pepper Noise Filtering")
+    print("="*60)
+    
+    # Load image
+    image_path = 'noisy_image.jpg'  # Replace with your noisy image
+    image = cv2.imread(image_path)
+    
+    # If no image, create a test image with noise
+    if image is None:
+        print(f"Could not load {image_path}, creating test image with noise...")
+        # Load a clean image or create one
+        clean_image_path = 'clean_image.jpg'
+        image = cv2.imread(clean_image_path)
         
-        for (let ky = -halfKernel; ky <= halfKernel; ky++) {
-          for (let kx = -halfKernel; kx <= halfKernel; kx++) {
-            const pixelY = Math.min(Math.max(y + ky, 0), height - 1);
-            const pixelX = Math.min(Math.max(x + kx, 0), width - 1);
-            const pixelIndex = (pixelY * width + pixelX) * 4;
-            
-            rValues.push(data[pixelIndex]);
-            gValues.push(data[pixelIndex + 1]);
-            bValues.push(data[pixelIndex + 2]);
-          }
-        }
+        if image is None:
+            print("Creating synthetic test image...")
+            image = np.random.randint(100, 200, (300, 300, 3), dtype=np.uint8)
+            # Add some structure
+            cv2.rectangle(image, (50, 50), (250, 250), (255, 255, 255), -1)
+            cv2.circle(image, (150, 150), 50, (0, 0, 0), -1)
         
-        rValues.sort((a, b) => a - b);
-        gValues.sort((a, b) => a - b);
-        bValues.sort((a, b) => a - b);
-        
-        const mid = Math.floor(rValues.length / 2);
-        const resultIndex = (y * width + x) * 4;
-        
-        result.data[resultIndex] = rValues[mid];
-        result.data[resultIndex + 1] = gValues[mid];
-        result.data[resultIndex + 2] = bValues[mid];
-        result.data[resultIndex + 3] = 255;
-      }
-    }
+        # Add salt and pepper noise
+        image = add_salt_pepper_noise(image, salt_prob=0.05, pepper_prob=0.05)
+        cv2.imwrite('generated_noisy_image.jpg', image)
+        print("Generated noisy image saved as 'generated_noisy_image.jpg'")
     
-    return result;
-  };
-
-  const processImage = (img, kSize, sig) => {
-    const imageData = getImageData(img);
+    # Convert to grayscale for processing
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image.copy()
     
-    const gaussianFiltered = applyGaussianFilter(imageData, kSize, sig);
-    const medianFiltered = applyMedianFilter(imageData, kSize);
+    print(f"Image shape: {gray.shape}")
     
-    setResults({
-      original: imageData,
-      gaussian: gaussianFiltered,
-      median: medianFiltered
-    });
-  };
-
-  const downloadCanvas = (imageData, filename) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = imageData.width;
-    canvas.height = imageData.height;
-    const ctx = canvas.getContext('2d');
-    ctx.putImageData(imageData, 0, 0);
+    # (a) Apply Gaussian smoothing
+    print("\n(a) Applying Gaussian smoothing...")
+    gaussian_filtered = gaussian_filter_manual(gray, kernel_size=5, sigma=1.5)
     
-    canvas.toBlob((blob) => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
-    });
-  };
-
-  const ResultImage = ({ imageData, title }) => {
-    const canvasRef = useRef(null);
+    # Also try OpenCV's GaussianBlur
+    gaussian_opencv = cv2.GaussianBlur(gray, (5, 5), 1.5)
     
-    useEffect(() => {
-      if (canvasRef.current && imageData) {
-        const ctx = canvasRef.current.getContext('2d');
-        ctx.putImageData(imageData, 0, 0);
-      }
-    }, [imageData]);
+    # (b) Apply median filter
+    print("(b) Applying median filter...")
+    median_filtered = median_filter_manual(gray, kernel_size=5)
     
-    return (
-      <div className="border rounded p-3">
-        <div className="flex justify-between items-center mb-2">
-          <h3 className="font-semibold">{title}</h3>
-          <button
-            onClick={() => downloadCanvas(imageData, `${title}.png`)}
-            className="p-1 hover:bg-gray-100 rounded"
-            title="Download"
-          >
-            <Download size={16} />
-          </button>
-        </div>
-        <canvas
-          ref={canvasRef}
-          width={imageData?.width || 0}
-          height={imageData?.height || 0}
-          className="w-full border"
-        />
-      </div>
-    );
-  };
+    # Also try OpenCV's medianBlur
+    median_opencv = cv2.medianBlur(gray, 5)
+    
+    # Display results
+    fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+    
+    axes[0, 0].imshow(gray, cmap='gray')
+    axes[0, 0].set_title('Original (Noisy) Image')
+    axes[0, 0].axis('off')
+    
+    axes[0, 1].imshow(gaussian_filtered, cmap='gray')
+    axes[0, 1].set_title('(a) Gaussian Filtered (Manual)')
+    axes[0, 1].axis('off')
+    
+    axes[0, 2].imshow(median_filtered, cmap='gray')
+    axes[0, 2].set_title('(b) Median Filtered (Manual)')
+    axes[0, 2].axis('off')
+    
+    axes[1, 0].imshow(gaussian_opencv, cmap='gray')
+    axes[1, 0].set_title('Gaussian (OpenCV)')
+    axes[1, 0].axis('off')
+    
+    axes[1, 1].imshow(median_opencv, cmap='gray')
+    axes[1, 1].set_title('Median (OpenCV)')
+    axes[1, 1].axis('off')
+    
+    # Show difference between Gaussian and Median
+    diff = np.abs(gaussian_filtered.astype(float) - median_filtered.astype(float))
+    axes[1, 2].imshow(diff, cmap='hot')
+    axes[1, 2].set_title('Difference (Gaussian - Median)')
+    axes[1, 2].axis('off')
+    plt.colorbar(axes[1, 2].imshow(diff, cmap='hot'), ax=axes[1, 2])
+    
+    plt.tight_layout()
+    plt.savefig('q8_results.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    
+    # Detailed comparison plot
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    
+    # Zoom in on a region to see detail
+    h, w = gray.shape
+    y1, y2 = h//3, 2*h//3
+    x1, x2 = w//3, 2*w//3
+    
+    axes[0].imshow(gray[y1:y2, x1:x2], cmap='gray')
+    axes[0].set_title('Original (Zoomed)')
+    axes[0].axis('off')
+    
+    axes[1].imshow(gaussian_filtered[y1:y2, x1:x2], cmap='gray')
+    axes[1].set_title('Gaussian Filtered (Zoomed)')
+    axes[1].axis('off')
+    
+    axes[2].imshow(median_filtered[y1:y2, x1:x2], cmap='gray')
+    axes[2].set_title('Median Filtered (Zoomed)')
+    axes[2].axis('off')
+    
+    plt.tight_layout()
+    plt.savefig('q8_zoomed_comparison.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    
+    # Analysis
+    print("\n" + "="*60)
+    print("ANALYSIS: Gaussian vs Median Filtering for Salt & Pepper Noise")
+    print("="*60)
+    
+    print("\n(a) Gaussian Smoothing:")
+    print("  - Linear filter (weighted average)")
+    print("  - Blurs noise but also blurs edges and details")
+    print("  - Noise pixels affect neighboring pixels")
+    print("  - Salt & pepper noise is reduced but NOT eliminated")
+    print("  - Image appears overall blurry")
+    
+    print("\n(b) Median Filtering:")
+    print("  - Non-linear filter (order statistic)")
+    print("  - EXCELLENT for impulse noise (salt & pepper)")
+    print("  - Replaces outliers with median value")
+    print("  - Preserves edges while removing noise")
+    print("  - Salt & pepper noise is effectively ELIMINATED")
+    
+    print("\n" + "-"*60)
+    print("CONCLUSION:")
+    print("-"*60)
+    print("For salt and pepper noise, MEDIAN FILTER is clearly superior:")
+    print("  ✓ Completely removes isolated noise pixels")
+    print("  ✓ Preserves edges and important details")
+    print("  ✓ Does not create blur artifacts")
+    print("\nGaussian filter is better for:")
+    print("  • Gaussian (random) noise")
+    print("  • General smoothing")
+    print("  • Pre-processing for other operations")
+    print("="*60)
+    
+    # Save results
+    cv2.imwrite('q8_gaussian_filtered.png', gaussian_filtered)
+    cv2.imwrite('q8_median_filtered.png', median_filtered)
+    
+    print("\nResults saved as: q8_results.png, q8_zoomed_comparison.png")
+    print("                  q8_gaussian_filtered.png, q8_median_filtered.png")
 
-  return (
-    <div className="max-w-7xl mx-auto p-6">
-      <h1 className="text-3xl font-bold mb-2">Question 8: Salt & Pepper Noise Filtering</h1>
-      <p className="text-gray-600 mb-6">
-        Compare Gaussian smoothing and median filtering for removing salt and pepper noise.
-      </p>
-
-      <div className="mb-6">
-        <label className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded cursor-pointer hover:bg-blue-600 w-fit">
-          <Upload size={20} />
-          <span>Upload Noisy Image</span>
-          <input
-            type="file"
-            accept="image/*"
-            onChange={handleImageUpload}
-            className="hidden"
-          />
-        </label>
-      </div>
-
-      <div className="mb-6 p-4 bg-gray-50 rounded space-y-4">
-        <div>
-          <label className="block mb-2 font-semibold">
-            Kernel Size: {kernelSize}×{kernelSize}
-          </label>
-          <input
-            type="range"
-            min="3"
-            max="11"
-            step="2"
-            value={kernelSize}
-            onChange={(e) => {
-              const val = parseInt(e.target.value);
-              setKernelSize(val);
-              handleParameterChange(val, sigma);
-            }}
-            className="w-full"
-          />
-          <div className="flex justify-between text-xs text-gray-600 mt-1">
-            <span>3×3</span>
-            <span>7×7</span>
-            <span>11×11</span>
-          </div>
-        </div>
-
-        <div>
-          <label className="block mb-2 font-semibold">
-            Gaussian Sigma (σ): {sigma.toFixed(1)}
-          </label>
-          <input
-            type="range"
-            min="0.5"
-            max="5"
-            step="0.1"
-            value={sigma}
-            onChange={(e) => {
-              const val = parseFloat(e.target.value);
-              setSigma(val);
-              handleParameterChange(kernelSize, val);
-            }}
-            className="w-full"
-          />
-          <div className="flex justify-between text-xs text-gray-600 mt-1">
-            <span>0.5</span>
-            <span>2.5</span>
-            <span>5.0</span>
-          </div>
-        </div>
-      </div>
-
-      {results.original && (
-        <>
-          <div className="mb-6 p-4 bg-blue-50 border-l-4 border-blue-500 rounded">
-            <h2 className="font-semibold text-lg mb-2">Analysis</h2>
-            <div className="text-sm space-y-2">
-              <p><strong>(a) Gaussian Smoothing:</strong> Blurs the entire image uniformly, reducing noise but also softening edges. Salt and pepper noise is reduced but not completely eliminated as it averages noise pixels with neighbors.</p>
-              <p><strong>(b) Median Filtering:</strong> Highly effective for salt and pepper noise. Replaces each pixel with the median value in its neighborhood, effectively removing isolated noise pixels while preserving edges better than Gaussian filtering.</p>
-              <p className="font-semibold text-green-700">Winner for salt & pepper noise: Median Filter</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-            <ResultImage imageData={results.original} title="Original (Noisy)" />
-            <ResultImage imageData={results.gaussian} title="(a) Gaussian Smoothed" />
-            <ResultImage imageData={results.median} title="(b) Median Filtered" />
-          </div>
-
-          <div className="p-4 bg-yellow-50 border-l-4 border-yellow-500 rounded">
-            <h3 className="font-semibold mb-2">Key Differences</h3>
-            <div className="text-sm space-y-2">
-              <p><strong>Gaussian Filter:</strong></p>
-              <ul className="list-disc ml-6">
-                <li>Linear filter (weighted average)</li>
-                <li>Smooths all features uniformly</li>
-                <li>Noise pixels affect neighboring pixels</li>
-                <li>Less effective for impulse noise</li>
-              </ul>
-              <p className="mt-2"><strong>Median Filter:</strong></p>
-              <ul className="list-disc ml-6">
-                <li>Non-linear filter (order statistic)</li>
-                <li>Preserves edges while removing noise</li>
-                <li>Isolated noise pixels are replaced entirely</li>
-                <li>Excellent for salt & pepper noise</li>
-              </ul>
-            </div>
-          </div>
-        </>
-      )}
-
-      {!image && (
-        <div className="text-center text-gray-500 py-12 border-2 border-dashed rounded">
-          <Upload size={48} className="mx-auto mb-4 opacity-50" />
-          <p>Upload an image with salt and pepper noise to begin filtering</p>
-        </div>
-      )}
-    </div>
-  );
-};
-
-export default NoiseFiltering;
+if __name__ == "__main__":
+    main()
